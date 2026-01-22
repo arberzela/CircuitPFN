@@ -18,61 +18,79 @@ def aggregate_heads_to_adjacency(
 ) -> np.ndarray:
     """
     Aggregate selected structural heads into a raw adjacency matrix.
-    
+
     Implements Equation 4 from the paper:
     W_raw[i,j] = (1/|S_causal|) * sum_{(l,h) in S_causal} E_n[A_n^{(l,h)}[i,j]]
-    
+
     Args:
         attention_dict: Dictionary mapping layer_idx -> attention (batch, heads, d, d)
         structural_heads: List of (layer_idx, head_idx) tuples
         aggregation: How to combine heads ('mean', 'max', 'sum')
-        
+
     Returns:
         Raw adjacency matrix (d, d)
     """
     head_matrices = []
-    
+
     for layer_idx, head_idx in structural_heads:
         if layer_idx not in attention_dict:
             continue
-        
+
         # Get attention for this layer: (batch, heads, d, d)
         layer_attention = attention_dict[layer_idx]
-        
+
+        print(f"DEBUG: Processing layer {layer_idx}, head {head_idx}, attention shape: {layer_attention.shape}")
+
         # Shape checking
         if layer_attention.ndim == 4:
-            batch_size, n_heads, d, _ = layer_attention.shape
+            batch_size, n_heads, d, d_k = layer_attention.shape
             if head_idx >= n_heads:
                 continue
             # Extract this head and average over batch
             head_attn = np.mean(layer_attention[:, head_idx, :, :], axis=0)
+            print(f"DEBUG: Extracted head attention shape (4D case): {head_attn.shape}")
         elif layer_attention.ndim == 3:
             # Already batch-averaged: (heads, d, d)
-            n_heads, d, _ = layer_attention.shape
+            n_heads, d, d_k = layer_attention.shape
             if head_idx >= n_heads:
                 continue
             head_attn = layer_attention[head_idx, :, :]
+            print(f"DEBUG: Extracted head attention shape (3D case): {head_attn.shape}")
         else:
+            print(f"DEBUG: Unexpected ndim: {layer_attention.ndim}")
             continue
-        
+
         head_matrices.append(head_attn)
     
     if not head_matrices:
         raise ValueError("No valid attention matrices found for structural heads")
-    
+
+    # Validate all matrices have the same shape and are square
+    first_shape = head_matrices[0].shape
+    if len(first_shape) != 2 or first_shape[0] != first_shape[1]:
+        raise ValueError(f"Expected square 2D matrices, but got shape {first_shape}")
+
+    for i, mat in enumerate(head_matrices):
+        if mat.shape != first_shape:
+            raise ValueError(f"Head matrix {i} has shape {mat.shape}, expected {first_shape}")
+
     # Stack all head matrices
     stacked = np.stack(head_matrices, axis=0)  # (n_heads, d, d)
+    print(f"DEBUG: Stacked attention shape: {stacked.shape}")
     
     # Aggregate across heads
     if aggregation == 'mean':
-        adj_raw = np.mean(stacked, axis=0)
+        adj_raw = np.nanmean(stacked, axis=0)
     elif aggregation == 'max':
-        adj_raw = np.max(stacked, axis=0)
+        adj_raw = np.nanmax(stacked, axis=0)
     elif aggregation == 'sum':
-        adj_raw = np.sum(stacked, axis=0)
+        adj_raw = np.nansum(stacked, axis=0)
     else:
         raise ValueError(f"Unknown aggregation method: {aggregation}")
-    
+
+    # Clean up any remaining NaNs or infinities
+    adj_raw = np.nan_to_num(adj_raw, nan=0.0, posinf=0.0, neginf=0.0)
+
     return adj_raw
 
 
@@ -83,15 +101,18 @@ def threshold_adjacency(
 ) -> np.ndarray:
     """
     Apply thresholding to enforce sparsity in the adjacency matrix.
-    
+
     Args:
         adjacency: Raw adjacency matrix (d, d)
         method: Thresholding method ('otsu', 'fixed', 'top_k', 'percentile')
         threshold: Threshold value (required for 'fixed' method)
-        
+
     Returns:
         Thresholded adjacency matrix (d, d)
     """
+    # Handle NaNs and infinities
+    adjacency = np.nan_to_num(adjacency, nan=0.0, posinf=0.0, neginf=0.0)
+    
     if method == 'fixed':
         if threshold is None:
             raise ValueError("threshold must be provided for 'fixed' method")
@@ -224,18 +245,29 @@ def enforce_directionality(
 def make_dag(adjacency: np.ndarray, binary: np.ndarray) -> np.ndarray:
     """
     Remove edges to convert graph to a DAG.
-    
+
     Uses a greedy approach: iteratively remove the weakest edge in cycles.
-    
+
     Args:
         adjacency: Weighted adjacency matrix
         binary: Binary adjacency matrix
-        
+
     Returns:
         DAG adjacency matrix
     """
     result = adjacency.copy()
-    G = nx.DiGraph(binary)
+
+    # Clean binary matrix before creating graph
+    binary_clean = np.nan_to_num(binary, nan=0.0, posinf=0.0, neginf=0.0).astype(int)
+
+    # Create graph manually to avoid NetworkX interpretation issues
+    d = binary_clean.shape[0]
+    G = nx.DiGraph()
+    G.add_nodes_from(range(d))
+    for i in range(d):
+        for j in range(d):
+            if binary_clean[i, j] > 0:
+                G.add_edge(i, j)
     
     # While there are cycles
     max_iterations = 1000
@@ -316,15 +348,36 @@ def extract_markov_blanket(
 def validate_dag(adjacency: np.ndarray) -> Dict[str, any]:
     """
     Validate that the adjacency matrix represents a valid DAG.
-    
+
     Args:
         adjacency: Adjacency matrix (d, d)
-        
+
     Returns:
         Dictionary with validation results
     """
-    binary = (adjacency > 0).astype(int)
-    G = nx.DiGraph(binary)
+    # Clean the adjacency matrix first
+    adjacency_clean = np.nan_to_num(adjacency, nan=0.0, posinf=0.0, neginf=0.0)
+    binary = (adjacency_clean > 0).astype(int)
+
+    # Ensure it's a proper square matrix
+    if binary.ndim != 2 or binary.shape[0] != binary.shape[1]:
+        raise ValueError(f"Adjacency matrix must be square 2D, got shape {binary.shape}")
+
+    # Use explicit converter to avoid ambiguity
+    try:
+        if hasattr(nx, 'from_numpy_array'):
+            G = nx.from_numpy_array(binary, create_using=nx.DiGraph)
+        else:
+            G = nx.from_numpy_matrix(binary, create_using=nx.DiGraph)
+    except Exception as e:
+        # Fallback: create graph manually from binary matrix
+        d = binary.shape[0]
+        G = nx.DiGraph()
+        G.add_nodes_from(range(d))
+        for i in range(d):
+            for j in range(d):
+                if binary[i, j] > 0:
+                    G.add_edge(i, j)
     
     is_dag = nx.is_directed_acyclic_graph(G)
     

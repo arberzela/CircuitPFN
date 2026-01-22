@@ -10,6 +10,12 @@ try:
     print("Initializing TabPFN...")
     model = TabPFNClassifier(device='cpu')
     
+    # Fit with dummy data to initialize model
+    import numpy as np
+    X_dummy = np.random.randn(10, 10)
+    y_dummy = np.random.randint(0, 2, 10)
+    model.fit(X_dummy, y_dummy)
+    
     print(f"\nModel type: {type(model)}")
     print(f"\nModel class: {model.__class__.__name__}")
     

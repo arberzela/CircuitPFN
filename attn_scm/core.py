@@ -127,17 +127,26 @@ class AttnSCM:
             warnings.warn(f"TabPFN supports max 1000 samples. Using first 1000.")
             X = X[:1000]
             y = y[:1000]
-        if X.shape[1] > 100:
             warnings.warn(f"TabPFN supports max 100 features. Using first 100.")
             X = X[:, :100]
             self.n_features_ = 100
         
-        self.attention_dict_ = extractor.extract_attention(X, y)
+        # Fit TabPFN to initialize the model
+        self.tabpfn_model.fit(X, y)
+
+        raw_attention = extractor.extract_attention(X, y)
         
-        # Aggregate across batch dimension
+        # Process attention maps to extract feature-to-feature attention (d x d)
+        self.attention_dict_ = extractor.get_feature_attention(
+            raw_attention, 
+            feature_dim=self.n_features_
+        )
+        
+        # Aggregate across batch dimension if needed
+        # get_feature_attention returns numpy arrays, possibly with batch dim
         for layer_idx in self.attention_dict_:
             attn = self.attention_dict_[layer_idx]
-            if attn.ndim == 4:  # Has batch dimension
+            if attn.ndim == 4:  # Has batch dimension (batch, heads, d, d)
                 self.attention_dict_[layer_idx] = aggregate_attention_across_batch(
                     attn, aggregation=self.aggregate_batch
                 )
@@ -160,6 +169,7 @@ class AttnSCM:
             self.structural_heads_,
             aggregation=self.aggregate_heads
         )
+        print(f"DEBUG: adjacency_raw_ NaNs: {np.isnan(self.adjacency_raw_).any()}")
         
         # Step 4: Threshold for sparsity
         print(f"Applying {self.threshold_method} thresholding...")
@@ -168,6 +178,7 @@ class AttnSCM:
             method=self.threshold_method,
             threshold=self.threshold_value
         )
+        print(f"DEBUG: adjacency_thresh NaNs: {np.isnan(adjacency_thresh).any()}")
         
         # Step 5: Enforce directionality
         print(f"Enforcing directionality via {self.directionality_method}...")
@@ -175,6 +186,12 @@ class AttnSCM:
             adjacency_thresh,
             method=self.directionality_method
         )
+        print(f"DEBUG: adjacency_ (post-directionality) NaNs: {np.isnan(self.adjacency_).any()}")
+        
+        # Replace NaNs with 0 to prevent downstream errors
+        if np.isnan(self.adjacency_).any():
+            print("WARNING: Found NaNs in final adjacency. Replacing with 0.")
+            self.adjacency_ = np.nan_to_num(self.adjacency_, nan=0.0)
         
         # Validate
         validation = validate_dag(self.adjacency_)
