@@ -276,7 +276,7 @@ class AttentionExtractor:
                 batch_size, n_heads, seq_len_q, seq_len_k = attn.shape
 
                 # Debug: check what we're getting
-                print(f"DEBUG: Layer {layer_idx} attention shape: {attn.shape}, extracting features: {feature_dim}")
+                #print(f"DEBUG: Layer {layer_idx} attention shape: {attn.shape}, extracting features: {feature_dim}")
 
                 # TabPFN's attention might be cross-attention (non-square)
                 # We need to identify where the features are in the sequence
@@ -284,7 +284,7 @@ class AttentionExtractor:
                 if seq_len_q >= feature_dim and seq_len_k >= feature_dim:
                     # Try extracting from the end (most common for TabPFN)
                     feat_attn = attn[:, :, -feature_dim:, -feature_dim:]
-                    print(f"DEBUG: Layer {layer_idx} extracted feature attention shape (from end): {feat_attn.shape}")
+                    #print(f"DEBUG: Layer {layer_idx} extracted feature attention shape (from end): {feat_attn.shape}")
 
                 elif seq_len_q < feature_dim and seq_len_k >= feature_dim:
                     # Query sequence too short - this is likely cross-attention
@@ -309,7 +309,7 @@ class AttentionExtractor:
                     # Normalize to be like attention weights (sum to 1 per row)
                     feat_attn = feat_attn / (feat_attn.sum(dim=-1, keepdim=True) + 1e-10)
 
-                    print(f"DEBUG: Layer {layer_idx} created square attention from cross-attention: {feat_attn.shape}")
+                    #print(f"DEBUG: Layer {layer_idx} created square attention from cross-attention: {feat_attn.shape}")
 
                 elif seq_len_q >= feature_dim and seq_len_k < feature_dim:
                     # Key sequence too short - extract from query and transpose
@@ -321,11 +321,11 @@ class AttentionExtractor:
                     # Expand to square
                     feat_vec = feat_attn.squeeze(3)  # (batch, heads, feature_dim)
                     feat_attn = torch.einsum('bhf,bhg->bhfg', feat_vec, feat_vec)
-                    print(f"DEBUG: Layer {layer_idx} created square attention from cross-attention (transposed): {feat_attn.shape}")
+                    #print(f"DEBUG: Layer {layer_idx} created square attention from cross-attention (transposed): {feat_attn.shape}")
 
                 else:
                     # Both dimensions too short - skip this layer as it doesn't contain feature info
-                    print(f"DEBUG: Layer {layer_idx} both dimensions too short, skipping this layer")
+                    #print(f"DEBUG: Layer {layer_idx} both dimensions too short, skipping this layer")
                     continue
 
                 # Final validation

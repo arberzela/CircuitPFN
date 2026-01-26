@@ -12,6 +12,7 @@ Attn-SCM leverages the self-attention mechanisms in TabPFN (Tabular Prior-Data F
 - **Structural head identification**: Entropy-based filtering to isolate causally-relevant attention heads
 - **Fast inference**: Orders of magnitude faster than traditional causal discovery algorithms
 - **Comprehensive experiments**: Four validation experiments demonstrating accuracy, localization, utility, and efficiency
+- **Intel Labs Causality Lab Integration**: Apply state-of-the-art causal discovery algorithms (RAI, FCI, ICD) to TabPFN downstream tasks (see [CAUSALITY_LAB_INTEGRATION.md](CAUSALITY_LAB_INTEGRATION.md))
 
 ## Installation
 
@@ -29,6 +30,9 @@ pip install -r requirements.txt
 
 # Install package
 pip install -e .
+
+# Optional: Install Intel Labs Causality Lab for additional algorithms
+pip install git+https://github.com/IntelLabs/causality-lab.git
 ```
 
 ## Quick Start
@@ -95,6 +99,30 @@ python experiments/exp_d_efficiency.py --max_n 1000 --max_d 50
 
 **Expected**: Constant/linear scaling vs exponential for PC algorithm
 
+### NEW: Causality Lab Integration Experiments
+
+Apply Intel Labs causality-lab algorithms to TabPFN downstream tasks:
+
+#### Experiment A Extended: Causality Lab Benchmark
+```bash
+# Compare AttnSCM with RAI, FCI, ICD on synthetic data
+python experiments/exp_a_causality_lab.py --num_datasets 100
+```
+
+#### Experiment E: TabPFN-Enhanced Causal Discovery
+```bash
+# Test if TabPFN attention patterns improve traditional causal discovery
+python experiments/exp_e_tabpfn_enhanced_causality.py --num_datasets 50
+```
+
+#### Experiment F: Real-World Datasets
+```bash
+# Apply causal discovery to OpenML tabular datasets
+python experiments/exp_f_real_datasets.py --datasets credit-g diabetes
+```
+
+**See [CAUSALITY_LAB_INTEGRATION.md](CAUSALITY_LAB_INTEGRATION.md) for detailed documentation.**
+
 ## Repository Structure
 
 ```
@@ -109,12 +137,17 @@ experiments/        # Experiment scripts
 ├── exp_a_synthetic.py
 ├── exp_b_layers.py
 ├── exp_c_feature_selection.py
-└── exp_d_efficiency.py
+├── exp_d_efficiency.py
+├── exp_a_causality_lab.py           # NEW: Extended benchmark
+├── exp_e_tabpfn_enhanced_causality.py # NEW: TabPFN enhancement
+└── exp_f_real_datasets.py           # NEW: Real-world datasets
 
 baselines/          # Baseline implementations
 ├── pc_algorithm.py
 ├── notears.py
-└── random_baseline.py
+├── random_baseline.py
+├── causality_lab_algorithms.py      # NEW: Intel Labs algorithms
+└── tabpfn_causality_adapter.py      # NEW: TabPFN-enhanced CI tests
 
 utils/              # Utilities
 ├── data_generation.py
